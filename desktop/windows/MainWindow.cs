@@ -42,6 +42,11 @@ internal sealed class MainWindow : Form
         };
         var trayMenu = new TrayMenu();
         trayMenu.Items.Add("打开 Cage", null, (_, _) => RestoreWindow());
+        if (!Backend.ClientOnly) {
+            var hostCommands = new HostCommandsMenu(Backend.Root, Backend.Executable, this);
+            trayMenu.Items.Add(hostCommands);
+            trayMenu.Opening += (_, _) => hostCommands.RefreshStatus();
+        }
         trayMenu.Items.Add("检查应用更新…", null, (_, _) => updater!.Handle("check"));
         trayMenu.Items.Add("关于 Cage", null, (_, _) => MessageBox.Show(this, $"Cage {AppUpdater.Version}\n本机隔离编码工作区", "关于 Cage"));
         trayMenu.Items.Add(new ToolStripSeparator());
