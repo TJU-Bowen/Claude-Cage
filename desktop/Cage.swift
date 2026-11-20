@@ -1,4 +1,5 @@
 import Cocoa
+import Darwin
 import WebKit
 import UniformTypeIdentifiers
 
@@ -14,7 +15,7 @@ enum CageDiagnostics {
 }
 
 @main
-final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
+final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var nativeInput: CageNativeInput!
@@ -143,6 +144,10 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
         if CageProfile.macGuestTrial {
             appMenu.addItem(withTitle: "复制试用客机登录密码", action: #selector(copyGuestLoginPassword), keyEquivalent: "")
         }
+        if !CageProfile.clientOnly && !CageProfile.macGuestTrial {
+            let item = appMenu.addItem(withTitle: "Mac 宿主命令", action: #selector(toggleHostCommands), keyEquivalent: "")
+            item.target = self
+        }
         appMenu.addItem(withTitle: "设置…", action: #selector(settings), keyEquivalent: ",")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "隐藏 Cage", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -176,6 +181,75 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
         let viewItem = NSMenuItem(title: "窗口", action: nil, keyEquivalent: ""); viewItem.submenu = view; main.addItem(viewItem)
         NSApp.mainMenu = main
     }
+    private struct HostCommandStatus: Decodable {
+        let pid: Int32
+        let state: String?
+    }
+
+    private var hostCommandMarkerURL: URL {
+        CageProfile.configURL().deletingLastPathComponent().appendingPathComponent("host-commands-v1.enabled")
+    }
+
+    private func hostCommandState() -> String? {
+        let directory = hostCommandMarkerURL.deletingLastPathComponent()
+        let decoder = JSONDecoder()
+        guard let statusData = try? Data(contentsOf: directory.appendingPathComponent("host-commands-v1.status.json")),
+              let controlData = try? Data(contentsOf: directory.appendingPathComponent("control.json")),
+              let status = try? decoder.decode(HostCommandStatus.self, from: statusData),
+              let control = try? decoder.decode(HostCommandStatus.self, from: controlData),
+              status.pid > 1, status.pid == control.pid,
+              let state = status.state, ["disabled", "waiting", "connected", "retrying"].contains(state),
+              let executable = Bundle.main.url(forResource: "cage", withExtension: nil) else { return nil }
+        var path = [CChar](repeating: 0, count: 4096)
+        guard proc_pidpath(status.pid, &path, UInt32(path.count)) > 0 else { return nil }
+        let runningPath = String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        guard URL(fileURLWithPath: runningPath).resolvingSymlinksInPath() == executable.resolvingSymlinksInPath() else { return nil }
+        return state
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard item.action == #selector(toggleHostCommands) else { return true }
+        let state = hostCommandState()
+        let granted = FileManager.default.fileExists(atPath: hostCommandMarkerURL.path)
+        if granted {
+            switch state {
+            case "connected": item.title = "关闭 Mac 宿主命令（已连接）"
+            case "retrying": item.title = "关闭 Mac 宿主命令（重连中）"
+            default: item.title = "关闭 Mac 宿主命令（等待本地客机）"
+            }
+        } else {
+            item.title = state == nil ? "Mac 宿主命令（需要本地 Linux 客机）" : "允许本地 Linux 客机执行 Mac 宿主命令…"
+        }
+        return granted || state != nil
+    }
+
+    @objc private func toggleHostCommands() {
+        let marker = hostCommandMarkerURL
+        if FileManager.default.fileExists(atPath: marker.path) {
+            if unlink(marker.path) != 0 && errno != ENOENT {
+                NSAlert(error: NSError(domain: NSPOSIXErrorDomain, code: Int(errno))).beginSheetModal(for: window)
+            }
+            return
+        }
+        guard hostCommandState() != nil, window.attachedSheet == nil else { return }
+        window.makeKeyAndOrderFront(nil)
+        let alert = NSAlert()
+        alert.messageText = "允许本地 Linux 客机执行 Mac 宿主命令？"
+        alert.informativeText = "客机内的程序可使用当前 Mac 用户的权限运行任意命令，访问该用户可访问的本机文件和网络。你可以在 Cage 菜单关闭授权。"
+        alert.addButton(withTitle: "允许")
+        alert.addButton(withTitle: "取消")
+        alert.buttons[0].keyEquivalent = ""
+        alert.buttons[1].keyEquivalent = "\r"
+        alert.beginSheetModal(for: window) { response in
+            guard response == .alertFirstButtonReturn, self.hostCommandState() != nil else { return }
+            do {
+                try CageUpdateFiles.write(Data("cage-host-commands-v1-macos\n".utf8), to: marker)
+            } catch {
+                NSAlert(error: error).beginSheetModal(for: self.window)
+            }
+        }
+    }
+
     @objc private func editUndo(){edit("undo",fallback:"undo:")}
     @objc private func editRedo(){edit("redo",fallback:"redo:")}
     @objc private func editCut(){edit("cut",fallback:"cut:")}

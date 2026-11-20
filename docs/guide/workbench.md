@@ -32,6 +32,30 @@ Linux 环境默认缓存项目文件的名称与属性，减少每次读取都�
   <figcaption>工作台侧栏、默认项目与终端入口（环境未启动）。截图版本：0.1.6-alpha-preview（开发构建） · macOS 原生应用 · 2026-11-07。<a href="../../www/public/docs/screenshots/first-start.jpg" target="_blank" rel="noopener">查看原图（2560 × 1764） ↗</a></figcaption>
 </figure>
 
+## 在 Windows 宿主执行命令（本改造版）
+
+在 Windows 上打开本地 Linux 环境并解锁 Cage。右键系统托盘的 Cage 图标，选择“允许本地 Linux 客机执行任意 Windows 命令”。托盘显示“已连接”后，重新打开客机里的 Claude Desktop，进入 Code 的本地会话。让 Claude 使用 `cage-host` 的 `run_host_command` 工具，指定宿主上的绝对工作目录。例如，让它在 `C:\Windows` 执行 `whoami` 和 `Get-Location`，并报告退出码。
+
+命令通过非交互式 Windows PowerShell 运行，继承 Cage 进程的 Windows 用户和环境。每次调用使用新的 PowerShell 进程，分别返回标准输出、标准错误和退出码。默认超时为 300 秒，可指定最长 3,600 秒，每路输出最多返回 512 KiB。命令使用宿主自己的网络配置。授权范围包括该用户可访问的文件和服务，持有同一客机用户权限的程序也可以调用此工具。
+
+再次点击托盘菜单中的“关闭 Windows 宿主命令”即可撤销。Cage 锁定、环境停止或连接关闭时，桥接停止接受请求。首次启用时 Cage 将工具注册到客机用户的 Claude Desktop 配置。独立使用 Claude Code CLI 的用户也可以在客机终端为自己的 CLI 配置注册同一个程序：
+
+```sh
+claude mcp add --scope user --transport stdio cage-host -- /usr/bin/python3 -I "$HOME/.local/lib/cage-host-command/runner.py" mcp
+```
+
+## 在 macOS 宿主执行命令（本改造版）
+
+在 Mac 上打开本地 Linux 环境并解锁 Cage。从原生菜单栏选择「Cage → 允许本地 Linux 客机执行 Mac 宿主命令…」，阅读授权范围后选择「允许」。菜单显示「已连接」后，重新打开客机里的 Claude Desktop，在 Code 本地会话中调用 \`cage-host\` 的 \`run_host_command\`。例如，使用 Mac 上的绝对工作目录 \`/Users/你的用户名\`，让 Claude 运行 \`pwd\` 并报告退出码。
+
+命令使用非交互式 zsh，以运行 Cage 的 Mac 用户权限执行，可访问该用户的本机文件和网络。执行结果包含标准输出、标准错误和退出码。客机内拥有同一用户权限的程序也可以调用此工具。此功能默认关闭，当前支持本地 Debian 或 Ubuntu 客机。
+
+从 Cage 菜单选择「关闭 Mac 宿主命令」即可撤销授权。Cage 锁定、环境停止或桥接断开时也会停止接受请求。独立使用 Claude Code CLI 时，可在客机终端注册同一个工具：
+
+\`\`\`sh
+claude mcp add --scope user --transport stdio cage-host -- /usr/bin/python3 -I "$HOME/.local/lib/cage-host-command/runner.py" mcp macos
+\`\`\`
+
 ## Git 提交与 GitHub 登录
 
 Git 可以在已共享的可写项目中暂存、提交和切换分支。首次提交前，在 Cage 的普通终端中检查提交者信息；没有配置时，填写自己希望出现在提交记录中的姓名和邮箱。GitHub 的隐私邮箱也可使用。
