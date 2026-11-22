@@ -2,6 +2,7 @@ import { shortcut } from "./platform.mjs";
 import React, { useEffect, useRef, useState } from "react";
 import {
   CircleAlert,
+  Cable,
   ExternalLink,
   Folder,
   FolderOpen,
@@ -72,6 +73,9 @@ export function WorkspaceSidebar({
   onBrowser,
   onTailscale,
   tailscaleOpen,
+  onWorkstations,
+  workstationsOpen,
+  workstationRequests = 0,
   onClaudeAccounts,
   claudeAccountsOpen,
   onClaudeWeb,
@@ -145,6 +149,9 @@ export function WorkspaceSidebar({
         </div>
         <button className={`sidebar-link ${tailscaleOpen ? "selected" : ""}`} aria-current={tailscaleOpen ? "page" : undefined} onClick={onTailscale} aria-label="打开 Tailscale"><Network size={17} />Tailscale</button>
         {ssh && <button className="sidebar-link ssh-navigation" onClick={ssh.open} aria-label="SSH 主机"><Server size={17} />SSH</button>}
+        {onWorkstations && <button className={`sidebar-link ${workstationsOpen ? "selected" : ""}`} aria-current={workstationsOpen ? "page" : undefined} onClick={onWorkstations}>
+          <Cable size={17} />工作机连接{workstationRequests > 0 && <span className="workstation-request-count" aria-label={`${workstationRequests} 个待批准申请`}>{workstationRequests}</span>}
+        </button>}
         <button className={`sidebar-link ${desktopOpen ? "selected" : ""}`} onClick={onClaudeDesktop} disabled={!running || busy} title="安装或打开 Claude Desktop"><Monitor size={17} />Claude Desktop</button>
         <button className={`sidebar-link ${claudeAccountsOpen ? "selected" : ""}`} onClick={onClaudeAccounts}
           aria-current={claudeAccountsOpen ? "page" : undefined}>

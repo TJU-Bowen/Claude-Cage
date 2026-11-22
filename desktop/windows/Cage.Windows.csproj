@@ -24,6 +24,8 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <EmbeddedResource Include="../../packaging/windows/installation-files.ps1" LogicalName="Cage.InstallationFiles.ps1" />
     <EmbeddedResource Include="../../packaging/windows/verified-file-deletion.cs" LogicalName="Cage.VerifiedFileDeletion.cs" />
+    <EmbeddedResource Include="../../internal/workbench/web/index.html" LogicalName="Cage.Workbench/index.html" />
+    <EmbeddedResource Include="../../internal/workbench/web/assets/*" LogicalName="Cage.Workbench/assets/%(Filename)%(Extension)" />
   </ItemGroup>
   <Target Name="RemoveUnusedWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
     <ItemGroup><Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" /></ItemGroup>

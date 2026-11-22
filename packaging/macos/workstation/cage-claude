@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+app_dir=$(CDPATH= cd -P "$(dirname "$0")" && pwd)
+export CAGE_WORKSTATION_SSH=/usr/bin/ssh
+export CAGE_WORKSTATION_SSH_CONFIG="$HOME/.ssh/config"
+export CC_REMOTE_HOST="${CC_REMOTE_HOST:-cage-lan}"
+exec "$app_dir/cc-remote" "$@"

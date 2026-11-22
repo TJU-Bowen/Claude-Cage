@@ -46,6 +46,10 @@ internal sealed class MainWindow : Form
             var hostCommands = new HostCommandsMenu(Backend.Root, Backend.Executable, this);
             trayMenu.Items.Add(hostCommands);
             trayMenu.Opening += (_, _) => hostCommands.RefreshStatus();
+            if (Program.SmokeOutput == null && WorkstationConnections.Available) {
+                trayMenu.Items.Add("工作机连接", null, (_, _) => ShowConnections());
+                Shown += (_, _) => WorkstationConnections.Start();
+            }
         }
         trayMenu.Items.Add("检查应用更新…", null, (_, _) => updater!.Handle("check"));
         trayMenu.Items.Add("关于 Cage", null, (_, _) => MessageBox.Show(this, $"Cage {AppUpdater.Version}\n本机隔离编码工作区", "关于 Cage"));
@@ -135,6 +139,7 @@ internal sealed class MainWindow : Form
         "保存并停止环境后安装重启", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK;
 
     public void RestoreWindow() { Show(); if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); PublishVisibility(); }
+    public void ShowConnections() { RestoreWindow(); Script("window.dispatchEvent(new Event('cage-show-workstations'))"); }
     private void RequestQuit()
     {
         RestoreWindow();
@@ -199,6 +204,10 @@ internal sealed class MainWindow : Form
                 status.Hide(); web.Show(); web.Focus(); PublishVisibility();
             };
             await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeScript);
+            if (WorkstationConnections.Available && Program.SmokeOutput == null) {
+                WorkstationConnections.InstallWorkbenchAssets(core, () => expectedPort);
+                await core.AddScriptToExecuteOnDocumentCreatedAsync("if(window===top && location.hostname==='localhost'){window.cageWorkstationConnections=true;window.cageStartWorkstations=" + (Program.OpenConnectionsOnStart ? "true" : "false") + ";}");
+            }
             if (Program.SmokeOutput != null) await core.AddScriptToExecuteOnDocumentCreatedAsync(SmokeDiagnosticsScript);
             webFailed = false;
             await Bootstrap();
@@ -363,6 +372,7 @@ internal sealed class MainWindow : Form
             object? result;
             switch (request.Text("action"))
             {
+                case "workstationConnections": result = await WorkstationConnections.Invoke(request, lifetime.Token); break;
                 case "remoteInput":
                     var accepted = nativeInput.ProcessRequest(request, web, web.ZoomFactor, out var returnedFocus);
                     result = request.TryGetProperty("returnFocus", out var restore) && restore.ValueKind == JsonValueKind.True

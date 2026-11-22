@@ -10,6 +10,7 @@ namespace Cage.Windows;
 internal static class Program
 {
     public static string? SmokeOutput { get; private set; }
+    public static bool OpenConnectionsOnStart { get; private set; }
     [STAThread]
     private static int Main(string[] args)
     {
@@ -19,6 +20,7 @@ internal static class Program
             SmokeOutput = output;
             if (File.Exists(output)) File.Delete(output);
         }
+        else if (args is ["--workstation-connections"]) OpenConnectionsOnStart = true;
         else if (args.Length != 0) return 2;
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Backend.Report(e.ExceptionObject is Exception error ? error.ToString() : "Unhandled native exception").GetAwaiter().GetResult();
         Application.ThreadException += (_, e) => {
@@ -42,7 +44,7 @@ internal static class Program
             try
             {
                 using var client = new NamedPipeClientStream(".", "Cage-" + key, PipeDirection.Out, PipeOptions.CurrentUserOnly);
-                client.Connect(3000); client.WriteByte(1);
+                client.Connect(3000); client.WriteByte(OpenConnectionsOnStart ? (byte)2 : (byte)1);
             }
             catch (IOException) { MessageBox.Show("Cage 已在运行，但窗口暂时无法唤起。请从任务栏打开 Cage。", "Cage"); }
             catch (TimeoutException) { MessageBox.Show("Cage 正在启动，请稍候。", "Cage"); }
@@ -60,8 +62,10 @@ internal static class Program
                         PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                     await pipe.WaitForConnectionAsync(cancellation.Token);
                     var data = new byte[1];
-                    if (await pipe.ReadAsync(data, cancellation.Token) == 1 && data[0] == 1 && form.IsHandleCreated)
-                        form.BeginInvoke(form.RestoreWindow);
+                    if (await pipe.ReadAsync(data, cancellation.Token) == 1 && form.IsHandleCreated) {
+                        if (data[0] == 2) form.BeginInvoke(form.ShowConnections);
+                        else if (data[0] == 1) form.BeginInvoke(form.RestoreWindow);
+                    }
                 }
                 catch (OperationCanceledException) { break; }
                 catch (IOException) { }

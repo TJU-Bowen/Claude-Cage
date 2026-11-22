@@ -1,0 +1,27 @@
+.workstation-request-count { margin-inline-start: auto; padding: 0 6px; border-radius: 5px; background: var(--hover); color: var(--ink); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ws-request { border: 1px solid var(--border); border-radius: 8px; background: var(--chrome); padding: 15px 16px; }
+.ws-decision,.ws-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ws-decision { margin-top: 12px; justify-content: space-between; }
+.ws-decision span { color: var(--muted); font-size: 12px; }
+.ws-decision strong { margin-inline-start: 8px; color: var(--ink); font-family: var(--font-mono, monospace); font-size: 16px; letter-spacing: .12em; }
+.ws-network { border-top: 1px solid var(--border); padding-top: 15px; }
+.ws-network summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.ws-network summary svg { transform: rotate(-90deg); }
+.ws-network[open] summary svg { transform: none; }
+.ws-network .field-help { margin: 12px 0; }
+.ws-device-card, .ws-selection, .ws-session-list li { display:flex; align-items:center; gap:12px; }
+.ws-device-card { border:1px solid var(--border); border-radius:10px; background:var(--chrome); padding-inline-end:12px; }
+.ws-device-open { display:flex; flex:1; align-items:center; gap:12px; min-width:0; padding:15px; border:0; border-radius:9px; text-align:start; color:var(--ink); background:transparent; cursor:pointer; }
+.ws-device-open:hover,.ws-device-open:focus-visible { background:var(--hover); }
+.ws-device-open .tailscale-peer-info { flex:1; }
+.ws-back { align-self:flex-start; }
+.ws-sessions .tailscale-state { margin-block:12px 18px; }
+.ws-selection { justify-content:space-between; border-block:1px solid var(--border); padding:10px 0; flex-wrap:wrap; }
+.ws-selection label { display:flex; align-items:center; gap:8px; }
+.ws-session-list { list-style:none; margin:0; padding:0; }
+.ws-session-list li { padding:13px 0; border-bottom:1px solid var(--border); }
+.ws-session-info { display:flex; flex:1; min-width:0; flex-direction:column; gap:4px; }
+.ws-session-info strong,.ws-session-info span { overflow-wrap:anywhere; }
+.ws-session-info span,.ws-session-info small { color:var(--muted); font-size:12px; }
+.ws-delete:not(:disabled):hover, .ws-errors { color:var(--danger, #e68076); }
+.ws-errors { padding-inline-start:20px; }

@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "daemon": {
+    "listen": "127.0.0.1:6798",
+    "relay": {
+      "enabled": false
+    },
+    "mcp": {
+      "enabled": false,
+      "injectIntoAgents": false
+    }
+  },
+  "agents": {
+    "providers": {
+      "cage-claude": {
+        "extends": "acp",
+        "label": "Claude · Cage",
+        "description": "Claude Code 在 Cage 客机运行，文件和命令在此工作机执行。",
+        "command": [
+          "cc-remote.exe"
+        ]
+      },
+      "claude": {
+        "enabled": false
+      },
+      "codex": {
+        "enabled": false
+      },
+      "copilot": {
+        "enabled": false
+      },
+      "opencode": {
+        "enabled": false
+      },
+      "pi": {
+        "enabled": false
+      },
+      "omp": {
+        "enabled": false
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+.cage-history-delete,.cage-history-dialog button,.cage-history-menu button,.cage-history-recovery button {
+  font:inherit; cursor:pointer; border:1px solid #7776; border-radius:6px; padding:5px 10px; color:inherit; background:transparent;
+}
+.cage-history-delete { flex-shrink:0; align-self:center; margin-inline:8px; color:#bf544b; font-size:12px; }
+.cage-history-delete:hover,.cage-history-delete:focus-visible { background:#c3544918; }
+.cage-history-dialog,.cage-history-menu,.cage-history-recovery { font:14px/1.5 system-ui,sans-serif; color:CanvasText; background:Canvas; color-scheme:light dark; border:1px solid #7776; border-radius:10px; box-shadow:0 12px 44px #0004; }
+.cage-history-dialog { width:min(420px,85vw); padding:22px; }
+.cage-history-dialog::backdrop { background:#0007; }
+.cage-history-dialog h2 { margin:0; font-size:18px; }
+.cage-history-dialog p { white-space:normal; overflow-wrap:anywhere; }
+.cage-history-actions { display:flex; justify-content:flex-end; gap:8px; }
+.cage-history-actions .cage-history-confirm { color:white; background:#aa3c33; border-color:#aa3c33; }
+.cage-history-error { color:#ca6058; }
+.cage-history-menu,.cage-history-recovery { position:fixed; z-index:10001; padding:5px; }
+.cage-history-menu button,.cage-history-recovery button { border:0; }
+.cage-history-menu button:hover { background:#8882; }
+.cage-history-recovery { inset:auto auto 48px 50%; max-width:85vw; }
+.cage-history-menu[hidden],.cage-history-recovery[hidden] { display:none; }

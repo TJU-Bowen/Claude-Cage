@@ -1,0 +1,179 @@
+diff --git a/src/main.ts b/src/main.ts
+index 3a71fc0..6719792 100755
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -79,6 +79,11 @@ async function doctor(target: string) {
+  * it at a script that runs them on the host, through `cc-remote --cli`.
+  */
+ function claudeShim(target: string) {
++  if (WINDOWS && Bun.env.CAGE_WORKSTATION_SSH_CONFIG) {
++    // ACP uses execFile for auth status. Windows cannot directly execute a .cmd file.
++    process.env.CAGE_WORKSTATION_CLI_HOST = target;
++    return join(dirname(process.execPath), "..", "CageWorkstation.exe");
++  }
+   const self = Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:/~BUN/") ? [process.execPath] : [process.execPath, Bun.main];
+   const name = `claude-${Bun.hash(target).toString(36)}`;
+   const command = [...self, "--host", target, "--cli"];
+diff --git a/src/options.ts b/src/options.ts
+index 96fef32..bc3c028 100644
+--- a/src/options.ts
++++ b/src/options.ts
+@@ -48,7 +48,8 @@ export function remote(host: string) {
+       // The client's servers win over the config's: it chose them for this session.
+       mcpServers: { ...bridgeAll({ ...local, ...options.mcpServers }, cwd, options.abortController?.signal), cc: localTools(cwd) },
+       toolAliases: { ...options.toolAliases, ...Object.fromEntries(LOCAL.map((t) => [t, PREFIX + t])) },
+-      disallowedTools: [...(options.disallowedTools ?? []), ...REMOVED],
++      disallowedTools: [...(options.disallowedTools ?? []), ...REMOVED,
++        ...(Bun.env.CAGE_WORKSTATION_SSH_CONFIG ? ["mcp__cage-host__run_host_command"] : [])],
+       // claude asks before any MCP tool; it never asks before its own reads.
+       allowedTools: [...(options.allowedTools ?? []), ...READS.map((t) => PREFIX + t)],
+       hooks: widenHooks(options.hooks),
+diff --git a/src/prompt.ts b/src/prompt.ts
+index 590ed5e..8d18da7 100644
+--- a/src/prompt.ts
++++ b/src/prompt.ts
+@@ -1,11 +1,17 @@
+-import { $ } from "bun";
++import { execFile } from "node:child_process";
+ import { release, type } from "node:os";
+ import { dirname, join } from "node:path";
+ import { LOCAL } from "./names";
+ import { WINDOWS } from "./platform";
+ import { home } from "./tools/util";
+ 
+-const run = (cmd: ReturnType<typeof $>, cwd: string) => cmd.cwd(cwd).quiet().nothrow().text().then((s) => s.trim());
++function readGit(cwd: string, args: string[]): Promise<string | null> {
++  return new Promise((resolve) => {
++    const child = execFile("git", args, { cwd, windowsHide: true, timeout: 5000, maxBuffer: 2 * 1024 * 1024 },
++      (error, stdout) => resolve(error ? null : stdout.trim()));
++    child.stdin?.end();
++  });
++}
+ 
+ /** CLAUDE.md files claude would load for this directory: the user's, then every ancestor's, nearest last. */
+ async function memory(cwd: string): Promise<string> {
+@@ -28,10 +34,10 @@ async function memory(cwd: string): Promise<string> {
+ }
+ 
+ async function git(cwd: string): Promise<string> {
+-  const branch = await run($`git rev-parse --abbrev-ref HEAD`, cwd);
++  const branch = await readGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+   if (!branch) return "";
+-  const status = (await run($`git status --short`, cwd)).split("\n").slice(0, 40).join("\n");
+-  const log = await run($`git log --oneline -5`, cwd);
++  const status = (await readGit(cwd, ["status", "--short"]) ?? "(unavailable)").split("\n").slice(0, 40).join("\n");
++  const log = await readGit(cwd, ["log", "--oneline", "-5"]) ?? "(unavailable)";
+   return `\n\n# gitStatus\nThis is the git status of the working directory at the start of the conversation.\nCurrent branch: ${branch}\n\nStatus:\n${status || "(clean)"}\n\nRecent commits:\n${log}`;
+ }
+ 
+diff --git a/src/proxy.ts b/src/proxy.ts
+index a702b56..d3f7a73 100644
+--- a/src/proxy.ts
++++ b/src/proxy.ts
+@@ -13,6 +13,7 @@ export type Session = {
+   cwd: string;
+   /** The folder claude runs in on the host, relative to the host's home. */
+   hostDir: string;
++  legacyDir?: string;
+   /** claude's permission mode, followed through the SDK's requests. */
+   mode: string;
+ };
+@@ -59,7 +60,8 @@ const approved = (cwd: string, command: string) => {
+  * local edits under acceptEdits, and shell commands the user said not to ask about again.
+  */
+ export function rewriter(s: Session) {
+-  const hostPath = new RegExp(`(?:/[^"\\\\/\\s]+)*/${escape(jsonText(s.hostDir))}(?=["/\\\\\\s]|$)`, "g");
++  const aliases = [s.hostDir, ...(s.legacyDir ? [s.legacyDir] : [])].map(dir => escape(jsonText(dir))).join("|");
++  const hostPath = new RegExp(`(?:/[^"\\\\/\\s]+)*/(?:${aliases})(?=["/\\\\\\s]|$)`, "g");
+   const local = jsonText(s.cwd);
+   const transcripts = join(projectsDir(), projectKey(s.cwd));
+ 
+diff --git a/src/ssh.ts b/src/ssh.ts
+index 05411a2..7c04331 100644
+--- a/src/ssh.ts
++++ b/src/ssh.ts
+@@ -23,6 +23,11 @@ const KEEPALIVE = ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"
+  * its own.
+  */
+ export const rsh = () => {
++  // An absolute OpenSSH executable and config file are each one argv entry, including spaces.
++  if (Bun.env.CAGE_WORKSTATION_SSH && Bun.env.CAGE_WORKSTATION_SSH_CONFIG) {
++    return [Bun.env.CAGE_WORKSTATION_SSH, "-F", Bun.env.CAGE_WORKSTATION_SSH_CONFIG,
++      "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", ...KEEPALIVE];
++  }
+   const custom = Bun.env.CC_REMOTE_SSH?.split(/\s+/).filter(Boolean);
+   if (custom?.length) return /^ssh(\.exe)?$/i.test(custom[0]!.split(/[\\/]/).pop()!) ? [...custom, ...KEEPALIVE] : custom;
+   if (WINDOWS) return ["ssh", ...KEEPALIVE];
+@@ -37,18 +42,48 @@ export const REMOTE_PATH = `PATH="$HOME/.local/bin:$PATH"`;
+ const posix = (path: string) => path.replaceAll("\\", "/").replace(/^([A-Za-z]):/, "/$1");
+ 
+ /** The host folder a local directory maps to, relative to the host's home. */
+-export const hostDir = (cwd: string) => `.cc-remote/ws/${hostname()}${posix(cwd)}`;
++const device = /^[0-9a-f]{64}$/.test(Bun.env.CAGE_WORKSTATION_DEVICE_ID ?? "") ? Bun.env.CAGE_WORKSTATION_DEVICE_ID : undefined;
++const legacyDir = (cwd: string) => `.cc-remote/ws/${hostname()}${posix(cwd)}`;
++export const hostDir = (cwd: string) => device ? `.cc-remote/ws/${device}${posix(cwd)}` : legacyDir(cwd);
++const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
++// Match the SDK's projectKey for long and non-ASCII paths, using the guest's absolute cwd.
++const keyScript = `import sys
++b=sys.argv[1].encode('utf-16-le')
++units=[b[i]+256*b[i+1] for i in range(0,len(b),2)]
++key=''.join(chr(n) if n<128 and chr(n).isalnum() else '-' for n in units)
++if len(key)>200:
++ h=0
++ for n in units: h=(h*31+n)&0xffffffff
++ h=abs(h if h<2147483648 else h-4294967296)
++ digits=''
++ while h: digits='0123456789abcdefghijklmnopqrstuvwxyz'[h%36]+digits; h//=36
++ key=key[:200]+'-'+(digits or '0')
++print(key)`;
++const projectKeyShell = (path: string) => `$(python3 -c ${quote(keyScript)} ${path})`;
+ 
+ /** Enters a stable per-directory folder on the host, so sessions and --continue have a home. */
+-const enter = (cwd: string) => {
++const enter = (cwd: string, session?: string) => {
+   const dir = `"$HOME"/${quote(hostDir(cwd))}`;
++  if (device && session && uuid.test(session)) {
++    const id = quote(session), owner = quote(device);
++    // Both upload and resume take this shared lock; the server takes it exclusively when purging.
++    // If a pre-upgrade transcript exists, enter its original project so it can be resumed in place.
++    return [
++      `D=${dir}`, `L="$HOME"/${quote(legacyDir(cwd))}`, `R="$HOME/.cc-remote/locks"/${owner}`,
++      `mkdir -p "$R"`, `exec 9>"$R"/${id}`, "flock -s 9",
++      `{ test ! -f "$HOME/.cc-remote/deleted"/${owner}/${id} || { echo '此会话的服务端记录已删除，请新建会话。' >&2; exit 73; }; }`,
++      `K=${projectKeyShell('"$L"')}`,
++      `if test -f "$HOME/.claude/projects/$K"/${id}.jsonl; then D="$L"; fi`,
++      `mkdir -p "$D"`, `cd "$D"`,
++    ].join(" && ");
++  }
+   return `mkdir -p ${dir} && cd ${dir}`;
+ };
+ 
+ /** The shell command the host runs: enter the folder, then exec claude. */
+ export function remoteCommand(args: string[], env: Record<string, string>, cwd: string): string {
+   const vars = Object.entries(env).map(([k, v]) => quote(`${k}=${v}`));
+-  return `${enter(cwd)} && ${REMOTE_PATH} exec env ${vars.join(" ")} claude ${args.map(quote).join(" ")}`;
++  return `${enter(cwd, argument(args, "--resume") ?? argument(args, "--session-id"))} && ${REMOTE_PATH} exec env ${vars.join(" ")} claude ${args.map(quote).join(" ")}`;
+ }
+ 
+ /**
+@@ -56,9 +91,10 @@ export function remoteCommand(args: string[], env: Record<string, string>, cwd:
+  * The folder name is claude's: the real path with every non-alphanumeric turned to `-`.
+  */
+ export function uploadCommand(sessionId: string, cwd: string): string {
+-  const projects = `"\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd -P | sed 's/[^a-zA-Z0-9]/-/g')"`;
++  const key = device ? projectKeyShell('"$(pwd -P)"') : "$(pwd -P | sed 's/[^a-zA-Z0-9]/-/g')";
++  const projects = `"\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/${key}"`;
+   const file = `"$P"/${quote(`${sessionId}.jsonl`)}`;
+-  return `${enter(cwd)} && P=${projects} && mkdir -p "$P" && if [ -f ${file} ]; then cat >/dev/null; else cat >${file}; fi`;
++  return `${enter(cwd, sessionId)} && P=${projects} && mkdir -p "$P" && if [ -f ${file} ]; then cat >/dev/null; else cat >${file}; fi`;
+ }
+ 
+ /** Runs claude on the host with these arguments, for `cc-remote --cli`. */
+@@ -108,6 +144,6 @@ export function spawner(host: string, cwd: string, env: Record<string, string>)
+ 
+     const child = spawn(command[0]!, command.slice(1), { stdio: ["pipe", "pipe", "pipe"], signal: options.signal, windowsHide: true });
+     child.stderr!.on("data", (chunk) => process.stderr.write(chunk));
+-    return proxy(child, { cwd, hostDir: hostDir(cwd), mode: argument(options.args, "--permission-mode") ?? "default" });
++    return proxy(child, { cwd, hostDir: hostDir(cwd), legacyDir: device ? legacyDir(cwd) : undefined, mode: argument(options.args, "--permission-mode") ?? "default" });
+   };
+ }

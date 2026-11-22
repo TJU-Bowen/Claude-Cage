@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mac 工作机手动 SSH 原型</title>
+<style>
+:root{color-scheme:light dark;font:16px/1.65 "Source Sans 3","PingFang SC","Microsoft YaHei UI",system-ui,sans-serif}
+body{max-width:850px;margin:0 auto;padding:24px clamp(18px,5vw,52px) 60px}
+h1,h2,h3{line-height:1.25}h1{margin-bottom:.4em}h2{font-size:1.25rem}
+a{color:LinkText}code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+pre{overflow:auto;padding:14px;border:1px solid #8496a466;border-radius:7px;font-size:.86rem;line-height:1.55}
+details{border-top:1px solid #8496a477;padding:16px 0}summary{cursor:pointer;font-weight:650;font-size:1.14rem}
+fieldset{border:1px solid #8496a477;border-radius:8px;display:flex;flex-wrap:wrap;gap:12px;padding:16px;margin:24px 0 15px}
+label{display:flex;flex-direction:column;font-size:.86rem;gap:3px}input,select,button{font:inherit;padding:5px 8px;border:1px solid #83909a88;border-radius:5px}
+button{cursor:pointer;font-size:.85rem}h3{font-size:1rem;margin:1.2rem 0 .35rem}p{margin:.65rem 0}
+#notice{min-height:1.5rem;color:inherit}
+</style>
+<main>
+<h1>Mac 工作机手动 SSH 原型</h1>
+<p>本页记录早期手动接入方式。局域网工作台在 Windows Cage 内批准配对，源码和 Mac 移植进度见<a href="../../windows/workstation/README.md">工作机说明</a>。</p>
+<p>Windows 上已有的 Cage Linux 客机运行已登录的 Claude Code。Mac 上的 Paseo 显示会话，cc-remote 在 Mac 项目中读写文件、执行 shell 命令，并把结果送回同一会话。</p>
+<p>本次 Windows 同机验收通过。Mac 适配器已交叉编译并检查 Mach-O 架构与代码签名的逐页哈希。它们是本地开发构建，使用 ad-hoc 签名。macOS 真机启动和局域网会话仍待验证。</p>
+<fieldset><legend>生成本次配对参数</legend>
+<label>Windows 的局域网 IPv4<input id="win" placeholder="填写 Cage 服务器的局域网 IPv4" autocomplete="off"></label>
+<label>Mac 的局域网 IPv4<input id="mac" placeholder="填 Mac Wi-Fi 的 IPv4 地址" autocomplete="off"></label>
+<label>Mac 芯片<select id="arch"><option value="arm64">Apple 芯片</option><option value="x64">Intel</option></select></label>
+<label>Mac 的主目录<input id="home" placeholder="在 Mac 终端运行 echo &quot;$HOME&quot;" autocomplete="off"></label>
+<label>Linux 客机用户名<input id="guest" placeholder="在 Cage 终端运行 id -un" autocomplete="off"></label>
+</fieldset>
+<p id="notice" aria-live="polite">填写参数后可以复制对应步骤。页面只在当前浏览器中生成命令。</p>
+
+<details open><summary>1 · 在 Mac 生成 SSH 公钥</summary>
+<p>在连接同一局域网的 Mac 上执行。已有这对密钥时可直接查看公钥。将输出的一行公钥交给 Windows 端，私钥留在 Mac。</p>
+<pre id="key">mkdir -p "$HOME/.ssh"
+if [ ! -e "$HOME/.ssh/cage-lan" ] &amp;&amp; [ ! -e "$HOME/.ssh/cage-lan.pub" ]; then
+  ssh-keygen -t ed25519 -f "$HOME/.ssh/cage-lan" -C cage-mac
+fi
+cat "$HOME/.ssh/cage-lan.pub"</pre><button data-copy="key">复制命令</button>
+<p>请同时记下 Mac 在这张网络上的 IPv4 地址。Windows 的防火墙只向这个来源放行。</p>
+</details>
+
+<details><summary>2 · 在 Windows 配对并建立局域网入口</summary>
+<p>先打开「启动 Cage Host」，确认原客机运行正常。在 Cage 的 Linux 终端运行 <code>id -un</code>，将结果填入上方「Linux 客机用户名」。编辑该用户的 <code>~/.ssh/authorized_keys</code>，将刚才 Mac 的公钥另起一行追加。保留已有条目，每台工作机使用自己的公钥。</p>
+<p>在这台 Windows 的管理员 PowerShell 执行下面的首次配置。入口绑定所填的局域网地址与 TCP 2222，目标端口从当前客机配置中读取。脚本会询问当前 Cage 配置目录下 <code>state\lima\&lt;实例名&gt;\ssh.config</code> 的完整路径。</p>
+<pre id="winsetup" data-win-mac>$ErrorActionPreference = 'Stop'
+$lan = 'WINDOWS_LAN_IP'
+$mac = 'MAC_LAN_IP'
+$interfaces = @(Get-NetIPAddress -AddressFamily IPv4 -IPAddress $lan -ErrorAction Stop | Select-Object -ExpandProperty InterfaceAlias -Unique)
+if ($interfaces.Count -ne 1) { throw '请确认 Windows 局域网地址及所在的网络接口。' }
+$nic = $interfaces[0]
+$rule = 'CageWorkstation-LAN-Mac'
+$cfg = (Read-Host '输入当前运行客机的 ssh.config 完整路径').Trim('"')
+$ports = @(Select-String -LiteralPath $cfg -Pattern '^\s*Port\s+(\d+)\s*$')
+if ($ports.Count -ne 1) { throw '请确认当前实例的 SSH 配置。' }
+$guestPort = [int]$ports[0].Matches[0].Groups[1].Value
+$null = Get-NetTCPConnection -State Listen -LocalAddress 127.0.0.1 -LocalPort $guestPort
+$category = (Get-NetConnectionProfile -InterfaceAlias $nic).NetworkCategory.ToString()
+if ($category -eq 'DomainAuthenticated') { $category = 'Domain' }
+if (Get-NetFirewallRule -Name $rule -ErrorAction SilentlyContinue) { throw '已有同名规则，请先核对。' }
+if (Get-NetTCPConnection -State Listen -LocalPort 2222 -ErrorAction SilentlyContinue) { throw '2222 已在使用。' }
+if ((netsh interface portproxy show v4tov4) -match '^\s*\S+\s+2222\s+\S+\s+\d+\s*$') { throw '已有 2222 转发，请先核对。' }
+$fw = New-NetFirewallRule -Name $rule -DisplayName 'Cage 工作机 SSH' -Direction Inbound -Action Allow -Protocol TCP -InterfaceAlias $nic -Profile $category -LocalAddress $lan -LocalPort 2222 -RemoteAddress $mac
+netsh interface portproxy add v4tov4 listenaddress=$lan listenport=2222 connectaddress=127.0.0.1 connectport=$guestPort
+if ($LASTEXITCODE -ne 0) {
+    $fw | Remove-NetFirewallRule
+    throw '创建转发失败。'
+}
+Get-NetTCPConnection -State Listen -LocalAddress $lan -LocalPort 2222</pre>
+<button data-copy="winsetup">复制 Windows 配置命令</button>
+<p>这是手动原型。Windows 的局域网地址、Mac 的源地址或客机 SSH 端口发生变化时，应停用旧入口，按新参数重新配置。Cage 启停前也请停用手动转发，避免旧规则指向主机后来复用的端口。</p>
+</details>
+
+<details><summary>3 · 在 Mac 验证连接到正确的客机</summary>
+<p>将这一段加入 Mac 的 <code>~/.ssh/config</code>。如果已存在同名 Host，请更新原条目。</p>
+<pre id="sshconfig" data-win data-guest>Host cage-lan
+    HostName WINDOWS_LAN_IP
+    Port 2222
+    User CAGE_GUEST_USER
+    IdentityFile ~/.ssh/cage-lan
+    IdentitiesOnly yes</pre><button data-copy="sshconfig">复制 SSH 配置</button>
+<p>在 Mac 终端连接。为密钥设置了口令时，先运行 <code>ssh-add "$HOME/.ssh/cage-lan"</code>。首次连接前，在 Cage 的 Linux 终端运行 <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code>。将结果与 Mac 首次连接时显示的 ED25519 指纹核对。</p>
+<pre id="sshcheck">ssh -T cage-lan 'id -un &amp;&amp; uname -s &amp;&amp; claude --version'</pre><button data-copy="sshcheck">复制客机检查命令</button>
+<p>这一步应看到你填入的客机用户名、<code>Linux</code> 和该客机里的 Claude Code 版本。</p>
+</details>
+
+<details><summary>4 · 在 Mac 安装并打开工作台</summary>
+<p>从 <a href="https://github.com/getpaseo/paseo/releases/tag/v0.17.2">Paseo v0.17.2 官方发布页</a>安装对应架构的 DMG。Apple 芯片选 arm64，Intel 选 x64。从 Windows 的 <code>ClaudeCage\Release</code> 复制同架构的 <code>Cage-Workstation-Adapter-macOS-…tar.gz</code> 到 Mac 的下载文件夹。</p>
+<p>把适配器解压到以下独立目录，执行连接检查。若已安装过这个目录，先确认要更新的版本。适配器会使用 Mac 的 SSH 别名和客机里的登录状态。</p>
+<pre id="install" data-arch>mkdir -p "$HOME/.local/lib"
+tar -xzf "$HOME/Downloads/Cage-Workstation-Adapter-macOS-MAC_ARCH.tar.gz" -C "$HOME/.local/lib"
+"$HOME/.local/lib/cage-workstation/cage-claude" doctor</pre><button data-copy="install">复制 Mac 安装与检查命令</button>
+<p>检查成功会输出客机 Claude 版本和 <code>ok</code>。打开 Mac 的 <code>~/.paseo/config.json</code>。新配置可以使用以下完整内容。已有配置时，合并 <code>agents.providers.cage-claude</code>，按需要设置 daemon 的本机监听和 relay。先退出再重新打开 Paseo 使配置生效。</p>
+<pre id="paseoconfig"></pre><button data-copy="paseoconfig">复制 Paseo 配置</button>
+<p>在 Paseo 点「新建工作区」，选择 Mac 上的测试目录和 <strong>Claude · Cage</strong>。可以发送「请在当前目录写一个测试文件，运行 <code>uname -s</code> 和 <code>pwd</code>，并报告结果」。工具授权后，应在 Mac 原目录看到新文件、系统结果 <code>Darwin</code> 和对应的 Mac 路径。</p>
+</details>
+
+<details><summary>停用入口或撤销这台 Mac 的配对</summary>
+<p>以下命令用于本指南创建的单个入口和防火墙规则。Windows 地址要填写创建规则时的实际地址。然后在客机 <code>~/.ssh/authorized_keys</code> 中移除该 Mac 的公钥即可撤销其后续 SSH 登录。</p>
+<pre id="disable" data-win>netsh interface portproxy delete v4tov4 listenaddress=WINDOWS_LAN_IP listenport=2222
+Remove-NetFirewallRule -Name 'CageWorkstation-LAN-Mac'</pre><button data-copy="disable">复制停用命令</button>
+</details>
+
+<details><summary>构建来源与适用范围</summary>
+<p>压缩包内的适配器来自 <a href="https://github.com/AkaraChen/cc-remote/tree/063f81524e84b7ad40a203d4c7da6f92fcfd2e41">固定版本的 cc-remote</a>，叠加包内的 <code>cc-remote.patch</code>。<code>cage-claude</code> 指定 Mac 的 OpenSSH 和客户端配置，并让此工作机会话排除旧的 Windows 宿主命令工具。Mac 的普通项目操作在 Mac 执行。</p>
+<p>这批 macOS 文件采用本地 ad-hoc 签名，未做 Apple Developer ID 公证。从源码构建时，检出上述 cc-remote 提交，应用 Cage 仓库的 <code>packaging/windows/workstation/cc-remote.patch</code>，用 Bun 1.4.5 执行 <code>bun install --frozen-lockfile</code>。Apple 芯片执行 <code>bun run build:darwin-arm64</code>，Intel 执行 <code>bun build src/main.ts --compile --minify --target=bun-darwin-x64 --outfile dist/cc-remote-darwin-x64</code>。将生成的文件命名为 <code>cc-remote</code>，连同本目录的 <code>cage-claude</code> 放入 <code>~/.local/lib/cage-workstation</code>，两个文件的权限均设为 <code>755</code>。</p>
+<p>工作台只在 Mac 本机监听，跨机通道使用局域网内的 SSH。首次发现与自动配对、多工作机重连、归档恢复和双端删除需分别验收。<a href="https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/netsh-interface">Windows 转发文档</a> · <a href="https://github.com/AkaraChen/cc-remote/blob/063f81524e84b7ad40a203d4c7da6f92fcfd2e41/README.zh-CN.md">cc-remote 工作机配置</a></p>
+</details>
+</main>
+<script>
+const byId = id => document.getElementById(id);
+const samples = new Map([...document.querySelectorAll("pre[id]")].map(p => [p.id, p.textContent]));
+const ipv4 = value => value.split(".").length === 4 && value.split(".").every(n => /^(0|[1-9]\d{0,2})$/.test(n) && Number(n) <= 255) && !/^(0|127)\./.test(value) && +value.split(".")[0] < 224;
+function update() {
+  const win = byId("win").value.trim();
+  const mac = byId("mac").value.trim();
+  const home = byId("home").value.trim().replace(/\/+$/, "");
+  const arch = byId("arch").value;
+  const guest = byId("guest").value.trim();
+  const validGuest = /^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}[$]?$/.test(guest);
+  for (const [id, sample] of samples) {
+    if (id === "paseoconfig") continue;
+    byId(id).textContent = sample.replaceAll("WINDOWS_LAN_IP", ipv4(win) ? win : "<Windows WLAN IPv4>")
+      .replaceAll("MAC_LAN_IP", ipv4(mac) ? mac : "<Mac 局域网 IPv4>").replaceAll("MAC_ARCH", arch)
+      .replaceAll("CAGE_GUEST_USER", () => validGuest ? guest : "<客机用户名>");
+  }
+  const validHome = /^\/[^/]/.test(home);
+  const exec = (validHome ? home : "<Mac 主目录绝对路径>") + "/.local/lib/cage-workstation/cage-claude";
+  byId("paseoconfig").textContent = JSON.stringify({version:1,daemon:{listen:"127.0.0.1:6798",relay:{enabled:false}},
+    agents:{providers:{"cage-claude":{extends:"acp",label:"Claude · Cage",command:[exec]}}}}, null, 2);
+  document.querySelectorAll("button[data-copy]").forEach(button => {
+    const id = button.dataset.copy;
+    button.disabled = id === "winsetup" ? !ipv4(win) || !ipv4(mac) || win === mac
+      : id === "paseoconfig" ? !validHome : (byId(id).hasAttribute("data-win") && !ipv4(win)) || (byId(id).hasAttribute("data-guest") && !validGuest);
+  });
+}
+byId("arch").addEventListener("change", update);
+["win","mac","home","guest"].forEach(id => byId(id).addEventListener("input", update));
+document.querySelectorAll("button[data-copy]").forEach(button => button.addEventListener("click", async () => {
+  const p = byId(button.dataset.copy);
+  try {
+    await navigator.clipboard.writeText(p.textContent);
+    byId("notice").textContent = "已复制「" + button.textContent + "」的内容。";
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    byId("notice").textContent = "已选中内容。请按 ⌘C 或 Ctrl+C 复制。";
+  }
+}));
+update();
+</script>
+</html>
