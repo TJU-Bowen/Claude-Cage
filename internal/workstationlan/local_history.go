@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -77,10 +78,20 @@ func (c *Client) History(id string) (localHistoryPage, error) {
 	return page, nil
 }
 
+// PaseoPaths returns the packaged workbench and its resources relative to the LAN helper.
+func PaseoPaths(helper string) (app, resources string) {
+	base := filepath.Dir(helper)
+	if runtime.GOOS == "darwin" {
+		contents := filepath.Join(filepath.Dir(base), "Helpers", "PaseoLAN.app", "Contents")
+		return filepath.Join(contents, "MacOS", "Paseo"), filepath.Join(contents, "Resources")
+	}
+	bundle := filepath.Join(base, "PaseoLAN")
+	return filepath.Join(bundle, "Paseo.exe"), filepath.Join(bundle, "resources")
+}
+
 // Use Paseo's own deletion fence, persistence flush and timeline removal, then verify its disk record.
 func deletePaseoRecord(ctx context.Context, helper, profile, agentID string) error {
-	resources := filepath.Join(filepath.Dir(helper), "PaseoLAN", "resources")
-	app := filepath.Join(filepath.Dir(resources), "Paseo.exe")
+	app, resources := PaseoPaths(helper)
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, app, "--disable-warning=DEP0040",

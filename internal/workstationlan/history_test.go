@@ -9,7 +9,10 @@ import (
 )
 
 func TestPurgeNativeConfinesSessionFiles(t *testing.T) {
-	profile := t.TempDir()
+	profile, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	target := "437deca1-f79b-440b-9579-14fa4ea26bc4"
 	other := "38251167-ad83-48b6-b778-3243cd178e98"
 	base := filepath.Join(profile, "Sessions")

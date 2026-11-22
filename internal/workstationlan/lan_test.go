@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -79,8 +80,12 @@ func TestDeviceLifecycle(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	// This address is scoped to loopback and distinct from the normally running server.
-	listener, e := net.Listen("tcp4", fmt.Sprintf("127.0.0.2:%d", ServicePort))
+	address := "127.0.0.2"
+	if runtime.GOOS == "darwin" {
+		// Darwin only configures 127.0.0.1 by default.
+		address = "127.0.0.1"
+	}
+	listener, e := net.Listen("tcp4", net.JoinHostPort(address, fmt.Sprint(ServicePort)))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -125,12 +130,16 @@ func TestDeviceLifecycle(t *testing.T) {
 	if e = c.Select(peer.ID); e != nil {
 		t.Fatal(e)
 	}
-	fresh, e := NewClient(clientDir, "CageLAN", "test client")
+	fresh, e := NewClient(clientDir, "Moved CageLAN", "test client")
 	if e != nil {
 		t.Fatal(e)
 	}
 	if fresh.Last() != peer.ID {
 		t.Fatal("lost selected server on restart")
+	}
+	rows, e = fresh.Rows(ctx)
+	if e != nil || len(rows) != 1 || rows[0].State != "approved" {
+		t.Fatalf("saved server could not reconnect: %v %v", rows, e)
 	}
 	again, e := NewServer(serverDir, "test server", guest)
 	if e != nil {
@@ -144,7 +153,8 @@ func TestDeviceLifecycle(t *testing.T) {
 		t.Fatal("missing persistent workbench profile")
 	}
 	conf, e := os.ReadFile(filepath.Join(fresh.Profile(peer.ID), "ssh.config"))
-	if e != nil || !strings.Contains(string(conf), "StrictHostKeyChecking yes") {
+	if e != nil || !strings.Contains(string(conf), "StrictHostKeyChecking yes") ||
+		!strings.Contains(string(conf), shellPath(fresh.Helper)) {
 		t.Fatal("guest pin missing", e)
 	}
 	sc, e := dialServer(ctx, peer, fresh.signer, "workstation")

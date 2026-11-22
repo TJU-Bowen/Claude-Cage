@@ -252,7 +252,7 @@ func run(args []string) error {
 	if e = show(); e != nil && !headless {
 		return e
 	}
-	return workstationlan.RunPanel(ctx, dir, l, ctrl, panel)
+	return workstationlan.RunPanel(ctx, dir, l, ctrl, panel, nil)
 }
 
 func main() {

@@ -2,8 +2,6 @@
 package main
 
 import (
-	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,9 +14,6 @@ import (
 	"github.com/sylvinus/agent-vm/internal/host"
 	"golang.org/x/sys/windows"
 )
-
-//go:embed paseo.json
-var initialConfig []byte
 
 const listen = "127.0.0.1:6798"
 
@@ -152,40 +147,8 @@ func run(args []string) error {
 	return cmd.Process.Release()
 }
 
-// Publish a complete initial config once; subsequent launches retain the user's UI settings.
-func seedConfig(home, endpoint, adapter string) error {
-	path := filepath.Join(home, "config.json")
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	var cfg struct {
-		Version int            `json:"version"`
-		Daemon  map[string]any `json:"daemon"`
-		Agents  struct {
-			Providers map[string]map[string]any `json:"providers"`
-		} `json:"agents"`
-	}
-	if err := json.Unmarshal(initialConfig, &cfg); err != nil {
-		return err
-	}
-	cfg.Daemon["listen"] = endpoint
-	cfg.Agents.Providers["cage-claude"]["command"] = []string{adapter}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(home, ".workstation-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	_, writeErr := tmp.Write(data)
-	if err = errors.Join(writeErr, tmp.Close()); err != nil {
-		return err
-	}
-	src, err := windows.UTF16PtrFromString(tmp.Name())
+func publishConfig(source, path string) error {
+	src, err := windows.UTF16PtrFromString(source)
 	if err != nil {
 		return err
 	}

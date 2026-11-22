@@ -61,10 +61,16 @@ func BindPanel(dir string) (net.Listener, Control, error) {
 	}
 	return nil, old, nil
 }
-func RunPanel(ctx context.Context, dir string, l net.Listener, ctrl Control, app Panel) error {
+func RunPanel(ctx context.Context, dir string, l net.Listener, ctrl Control, app Panel, ready func() error) error {
 	if e := writeJSON(filepath.Join(dir, "control.json"), ctrl); e != nil {
 		l.Close()
 		return e
+	}
+	if ready != nil {
+		if e := ready(); e != nil {
+			l.Close()
+			return e
+		}
 	}
 	serv := &http.Server{Handler: app.Handler(ctrl), ReadHeaderTimeout: 4 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 70 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
 	stop := context.AfterFunc(ctx, func() { serv.Close() })

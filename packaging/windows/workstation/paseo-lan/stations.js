@@ -169,6 +169,8 @@
     disconnectedCallback() { this.dispose?.(); this.dispose = undefined; }
   });
   if (document.body.classList.contains("cage-selector")) {
-    bridge.onShow(() => document.querySelector("cage-server-list")?.dispatchEvent(new Event("cage-scan")));
+    const scan = () => document.querySelector("cage-server-list")?.dispatchEvent(new Event("cage-scan"));
+    bridge.onShow(scan);
+    document.getElementById("cage-selector-servers")?.addEventListener("click", scan);
   }
 })();

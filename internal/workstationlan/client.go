@@ -234,11 +234,18 @@ func (c *Client) remember(p Peer, guest GuestInfo) error {
 	if ok && old.Guest != guest {
 		return errors.New("客机身份已变化，请先忘记旧连接再配对")
 	}
-	if ok && old.Peer == p {
-		delete(c.waits, p.ID)
-		return nil
-	}
 	dir := c.Profile(p.ID)
+	alias := "cage-" + p.ID
+	known := filepath.Join(dir, "known_hosts")
+	sshConfig := filepath.Join(dir, "ssh.config")
+	conf := fmt.Sprintf("Host cage-lan\n  HostName cage-guest\n  User %s\n  HostKeyAlias %s\n  HostKeyAlgorithms ssh-ed25519\n  StrictHostKeyChecking yes\n  UpdateHostKeys no\n  IdentitiesOnly yes\n  IdentityFile %s\n  UserKnownHostsFile %s\n  ProxyCommand %s proxy %s\n", guest.User, alias, sshPath(filepath.Join(c.Dir, "identity")), sshPath(known), shellPath(c.Helper), p.ID)
+	if ok && old.Peer == p {
+		// The app can be moved or rebuilt without changing the paired identity.
+		if data, err := os.ReadFile(sshConfig); err == nil && string(data) == conf {
+			delete(c.waits, p.ID)
+			return nil
+		}
+	}
 	if e = host.EnsurePrivateDir(dir); e != nil {
 		return e
 	}
@@ -249,13 +256,10 @@ func (c *Client) remember(p Peer, guest GuestInfo) error {
 			return e
 		}
 	}
-	alias := "cage-" + p.ID
-	known := filepath.Join(dir, "known_hosts")
 	if e = writeFile(known, append([]byte(alias+" "), ssh.MarshalAuthorizedKey(g)...)); e != nil {
 		return e
 	}
-	conf := fmt.Sprintf("Host cage-lan\n  HostName cage-guest\n  User %s\n  HostKeyAlias %s\n  HostKeyAlgorithms ssh-ed25519\n  StrictHostKeyChecking yes\n  UpdateHostKeys no\n  IdentitiesOnly yes\n  IdentityFile %s\n  UserKnownHostsFile %s\n  ProxyCommand %s proxy %s\n", guest.User, alias, sshPath(filepath.Join(c.Dir, "identity")), sshPath(known), shellPath(c.Helper), p.ID)
-	if e = writeFile(filepath.Join(dir, "ssh.config"), []byte(conf)); e != nil {
+	if e = writeFile(sshConfig, []byte(conf)); e != nil {
 		return e
 	}
 	c.saved.Servers[p.ID] = SavedServer{Peer: p, Guest: guest, DesktopPort: port}

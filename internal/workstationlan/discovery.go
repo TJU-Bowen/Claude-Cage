@@ -177,6 +177,17 @@ func discover(ctx context.Context) ([]Peer, error) {
 	}
 	peers := map[string]Peer{}
 	var mu sync.Mutex
+	var sent bool
+	var sendError error
+	recordSend := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err == nil {
+			sent = true
+		} else if sendError == nil {
+			sendError = err
+		}
+	}
 	var wg sync.WaitGroup
 	for _, l := range active {
 		wg.Add(1)
@@ -184,6 +195,7 @@ func discover(ctx context.Context) ([]Peer, error) {
 			defer wg.Done()
 			c, e := net.ListenUDP("udp4", &net.UDPAddr{IP: l.ip})
 			if e != nil {
+				recordSend(e)
 				return
 			}
 			defer c.Close()
@@ -203,7 +215,11 @@ func discover(ctx context.Context) ([]Peer, error) {
 				if ctx.Err() != nil {
 					return
 				}
-				_, _ = c.WriteToUDP(data, mdnsGroup)
+				_, e := c.WriteToUDP(data, mdnsGroup)
+				recordSend(e)
+				if e != nil {
+					return
+				}
 				_ = c.SetReadDeadline(time.Now().Add(600 * time.Millisecond))
 				for {
 					n, src, e := c.ReadFromUDP(b)
@@ -228,6 +244,9 @@ func discover(ctx context.Context) ([]Peer, error) {
 		}()
 	}
 	wg.Wait()
+	if !sent && sendError != nil && ctx.Err() == nil {
+		return nil, fmt.Errorf("无法发送局域网发现请求：%w", sendError)
+	}
 	out := make([]Peer, 0, len(peers))
 	for _, v := range peers {
 		out = append(out, v)

@@ -8,5 +8,10 @@
   <link rel="stylesheet" href="./cage-stations.css">
   <script defer src="./cage-stations.js"></script>
 </head>
-<body class="cage-selector"><main><cage-server-list standalone></cage-server-list></main></body>
+<body class="cage-selector">
+  <nav class="cage-selector-sidebar" aria-label="工作台">
+    <button type="button" id="cage-selector-servers" aria-current="page">局域网服务器</button>
+  </nav>
+  <main><cage-server-list standalone></cage-server-list></main>
+</body>
 </html>

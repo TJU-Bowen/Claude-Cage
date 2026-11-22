@@ -6,9 +6,13 @@ import {createHash} from "node:crypto";
 import {createCageNavigation} from "./navigation.mjs";
 
 const here=path.dirname(fileURLToPath(import.meta.url));
+const macResources=process.argv[2]==="--macos-resources";
 const workstation=path.resolve(process.argv[2]||path.join(here,"../../../../../Workstation"));
-const source=path.join(workstation,"Paseo"),target=path.resolve(process.argv[3] || path.join(workstation,"PaseoLAN"));
-const upstream=fs.readFileSync(path.join(source,"resources","app.asar"));
+const source=macResources?path.resolve(process.argv[3]):path.join(workstation,"Paseo");
+const target=macResources?source:path.resolve(process.argv[3]||path.join(workstation,"PaseoLAN"));
+const resources=macResources?"":"resources";
+const asar=path.join(resources,"app.asar");
+const upstream=fs.readFileSync(path.join(source,asar));
 const oldBase=8+upstream.readUInt32LE(4);
 const header=JSON.parse(upstream.toString("utf8",16,16+upstream.readUInt32LE(12)));
 function entry(name){return name.split("/").reduce((n,k)=>n.files[k],header);}
@@ -36,10 +40,16 @@ const prefix=Buffer.alloc(16+padded);
 prefix.writeUInt32LE(4,0);prefix.writeUInt32LE(8+padded,4);prefix.writeUInt32LE(4+padded,8);prefix.writeUInt32LE(json.length,12);json.copy(prefix,16);
 // Bind the packaged v0.17.2 history screen's normal refetch callback. This keeps search, focus,
 // unrelated tabs and drafts intact when the external deletion RPC removes a history entry.
-const jsDir="resources/app-dist/_expo/static/js/web";
-const screenFile=jsDir+"/index-0422b09662215760f9182583421ae911.js";
+const appDist=path.join(resources,"app-dist");
+const jsDir=path.join(appDist,"_expo/static/js/web");
 const screenHook="refreshAll:ee}=(0,T.useAgentHistory)(U),se=Q&&W.length>0;";
-const originalScreen=fs.readFileSync(path.join(source,screenFile),"utf8");
+const screens=fs.readdirSync(path.join(source,jsDir))
+    .filter(name=>/^index-.*\.js$/.test(name))
+    .map(name=>path.join(jsDir,name))
+    .map(file=>({file, text:fs.readFileSync(path.join(source,file),"utf8")}))
+    .filter(({text})=>text.includes(screenHook));
+if(screens.length!==1)throw Error("Expected one Paseo 0.17.2 workbench screen");
+const [{file:screenFile,text:originalScreen}]=screens;
 function replaceOnce(input, marker, replacement) {
     const position = input.indexOf(marker);
     if (position < 0 || input.indexOf(marker, position + marker.length) !== -1) {
@@ -69,7 +79,8 @@ screen = replaceOnce(screen, '"/schedules"===s||h', '"/schedules"===s||"/cage-se
 screen = replaceOnce(screen, 'children:[s,c,l,u,d,h,S]', 'children:[s,c,l,u,d,h,S,(0,Je.jsx)(j.Stack.Screen,{name:"cage-servers"})]');
 screen = replaceOnce(screen, 'n=o.filter(x),t[0]=o', `n=r(${routeId}).withSidebarItem(o.filter(x)),t[0]=o`);
 screen = replaceOnce(screen, 'const P={"new-workspace":(0,c.memo)', `const P={"cage-servers":r(${routeId}).SidebarRow,"new-workspace":(0,c.memo)`);
-const changed=new Set(["resources/app.asar","resources/app-dist/index.html",screenFile]);
+const htmlEntry=path.join(appDist,"index.html");
+const changed=new Set([asar,htmlEntry,screenFile].map(file=>file.split(path.sep).join("/")));
 function linkTree(rel){
     const base=path.join(source,rel),out=path.join(target,rel);fs.mkdirSync(out,{recursive:true});
     for(const item of fs.readdirSync(base,{withFileTypes:true})){
@@ -82,19 +93,21 @@ function linkTree(rel){
         }
     }
 }
-linkTree("");
+if(!macResources)linkTree("");
 function publish(dest,parts){
     const tmp=path.join(path.dirname(dest),"."+path.basename(dest)+"."+process.pid+".tmp");
     const fd=fs.openSync(tmp,"wx");
     try{for(const data of parts){let offset=0;while(offset<data.length)offset+=fs.writeSync(fd,data,offset,data.length-offset);}fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
     try{fs.renameSync(tmp,dest);}finally{if(fs.existsSync(tmp))fs.unlinkSync(tmp);}
 }
-publish(path.join(target,"resources/app.asar"),[prefix,upstream.subarray(oldBase),...extras]);
+publish(path.join(target,asar),[prefix,upstream.subarray(oldBase),...extras]);
 publish(path.join(target,screenFile),[Buffer.from(screen)]);
-const dist=path.join(target,"resources/app-dist");
-for(const [src,dst] of [["stations.js","cage-stations.js"],["stations.css","cage-stations.css"],["history.js","cage-history.js"],["history.css","cage-history.css"],["selector.html","cage-selector.html"]])publish(path.join(dist,dst),[fs.readFileSync(path.join(here,src))]);
-const html=fs.readFileSync(path.join(source,"resources/app-dist/index.html"),"utf8")
+const dist=path.join(target,appDist);
+for(const [src,dst] of [["stations.js","cage-stations.js"],["stations.css","cage-stations.css"],["history.js","cage-history.js"],["history.css","cage-history.css"]])publish(path.join(dist,dst),[fs.readFileSync(path.join(here,src))]);
+const selector=fs.readFileSync(path.join(here,"selector.html"),"utf8");
+publish(path.join(dist,"cage-selector.html"),[Buffer.from(macResources?replaceOnce(selector,'class="cage-selector"','class="cage-selector cage-selector-macos"'):selector)]);
+const html=fs.readFileSync(path.join(source,htmlEntry),"utf8")
     .replace("</head>",'<link rel="stylesheet" href="/cage-stations.css"><link rel="stylesheet" href="/cage-history.css"></head>')
     .replace("</body>",'<script defer src="/cage-stations.js"></script><script defer src="/cage-history.js"></script></body>');
 publish(path.join(dist,"index.html"),[Buffer.from(html)]);
-console.log("Built Cage workstation with in-app LAN selection:",path.join(target,"Paseo.exe"));
+console.log("Built Cage workstation with in-app LAN selection:",target);

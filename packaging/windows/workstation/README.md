@@ -49,8 +49,8 @@ Windows Cage 继续运行已登录的 Claude Code。Mac 工作台负责显示会
 
 - 共享的发现、配对和隧道代码位于 [internal/workstationlan](../../../internal/workstationlan)。它已通过 Apple Silicon 和 Intel 两种 macOS 目标的交叉编译。
 - 工作机执行适配器使用上表中固定的 cc-remote 版本和[本仓库的补丁](cc-remote.patch)。这份源码已生成两种架构的 Mach-O 可执行文件。Paseo v0.17.2 也有两种架构的 macOS 打包配置。
-- [工作台启动器](../../../cmd/cage-workstation)和[局域网程序入口](../../../cmd/cage-lan)当前只有 Windows 实现。移植时需要补齐 Darwin 客户端入口、Paseo.app 的资源与启动路径、工作机数据路径，以及已归档会话清理时使用的本地 Paseo 程序路径。侧栏和历史页的现有实现见 [paseo-lan](paseo-lan)。
+- macOS 通过 [CageWorkstation](../../../cmd/cage-workstation) 启动工作台和局域网连接。用对应架构的 Paseo v0.17.2 和打过补丁的 cc-remote [构建工作机应用](../../macos/workstation/README.md)。侧栏和历史页沿用 [paseo-lan](paseo-lan)。
 
-在 Mac 真机上，从左侧「局域网服务器」发现 Windows Cage，在 Windows Cage 内批准申请，重开 Mac 工作台后自动重连。随后在 Mac 临时项目里让 Claude 写入一个文件，并运行 `pwd` 和 `uname -s` 核对执行位置。完整的 Mac 工作台仍待实现和真机验收。
+在 Mac 真机上，从左侧「局域网服务器」发现 Windows Cage，在 Windows Cage 内批准申请，重开 Mac 工作台后自动重连。随后在 Mac 临时项目里让 Claude 写入一个文件，并运行 `pwd` 和 `uname -s` 核对执行位置。
 
 早期手动 SSH 原型的[适配器启动脚本](../../macos/workstation/cage-claude)与[交互式接入说明](../../macos/workstation/manual-ssh.zh-CN.html)保存在仓库中。局域网工作台使用 Cage 内批准的配对流程。

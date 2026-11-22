@@ -12,6 +12,24 @@
 }
 .cage-server-scroll { flex: 1; min-height: 0; overflow: auto; }
 .cage-selector { margin: 0; min-height: 100vh; }
+.cage-selector-sidebar { display: none; }
+.cage-selector-macos { display: grid; grid-template-columns: 168px minmax(0, 1fr); }
+.cage-selector-macos .cage-selector-sidebar {
+  display: block;
+  padding: 20px 12px;
+  border-right: 1px solid #363534;
+}
+.cage-selector-sidebar button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #343331;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
 cage-server-list {
   display: block;
   box-sizing: border-box;
