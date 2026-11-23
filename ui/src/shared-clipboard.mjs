@@ -13,6 +13,7 @@ export async function copyGuestText({ request, sendCopy, valid }) {
 // A guest whose clipboard service keeps failing, for example while its
 // components wait for an update, must not be hit every 1.5 seconds.
 export const clipboardReconnectDelay = failures => Math.min(1500 * 2 ** Math.max(0, failures), 30000);
+const emptyTextPayload = JSON.stringify({ text: "" });
 
 // One connection owns clipboard synchronization for the workbench window,
 // including while its remote canvas is hidden or the window is unfocused.
@@ -65,14 +66,17 @@ export function shareClipboard({ connect, native, onStatus, setActive, interval 
   const payload = value => typeof value.text === "string" ? { text: value.text }
     : typeof value.png === "string" ? { png: value.png }
       : typeof value.files === "string" ? { files: value.files } : null;
-  const readHost = async (initial = false) => {
+  const readHost = async (reason) => {
     if (disposed || !guestReady || socket?.readyState !== 1) return;
     const currentSocket = socket, currentGeneration = generation, session = sessionGeneration;
     let releaseFiles = () => {};
     try {
       const current = await native("clipboardRevision");
       if (typeof current !== "number") throw new Error("Clipboard revision unavailable");
-      if (!initial && current === revision && current === acknowledgedRevision) return;
+      // A macOS pasteboard provider can make image data available after an
+      // empty read without changing its revision. Recheck it on user paste.
+      const recheckEmpty = reason === "paste" && lastPayload === emptyTextPayload;
+      if (reason !== "initial" && !recheckEmpty && current === revision && current === acknowledgedRevision) return;
       const value = await native("clipboardSyncRead");
       releaseFiles = retainFiles(value);
       const content = payload(value);
@@ -82,7 +86,7 @@ export function shareClipboard({ connect, native, onStatus, setActive, interval 
       revision = value.revision;
       if (!content) throw new Error("Clipboard content unavailable");
       const encoded = JSON.stringify(content);
-      if (initial || value.revision !== acknowledgedRevision || encoded !== lastPayload) await send(currentSocket, content);
+      if (reason === "initial" || value.revision !== acknowledgedRevision || encoded !== lastPayload) await send(currentSocket, content);
       if (disposed || !guestReady || socket !== currentSocket || currentGeneration !== generation) return;
       acknowledgedRevision = value.revision;
       lastPayload = encoded;
@@ -98,9 +102,9 @@ export function shareClipboard({ connect, native, onStatus, setActive, interval 
       throw new Error("Clipboard synchronization failed");
     } finally { releaseFiles(); }
   };
-  const poll = (initial = false) => {
+  const poll = (reason = "background") => {
     if (!polling) {
-      const current = readHost(initial).finally(() => { if (polling === current) polling = undefined; });
+      const current = readHost(reason).finally(() => { if (polling === current) polling = undefined; });
       polling = current;
     }
     return polling;
@@ -116,7 +120,7 @@ export function shareClipboard({ connect, native, onStatus, setActive, interval 
       guestSession = hello.session;
       guestReady = supported && hello.available === true;
       if (!guestReady) setActive(false);
-      if (guestReady && (!previouslyReady || revision === undefined)) void poll(true).catch(warn);
+      if (guestReady && (!previouslyReady || revision === undefined)) void poll("initial").catch(warn);
       return;
     }
     if (value.ack) {
@@ -172,7 +176,12 @@ export function shareClipboard({ connect, native, onStatus, setActive, interval 
     const signal = sessionController.signal;
     requireSession(signal);
     for (;;) {
-      await waitForSession(poll(), signal);
+      if (polling) {
+        await waitForSession(polling, signal);
+        requireSession(signal);
+        continue;
+      }
+      await waitForSession(poll("paste"), signal);
       const pendingWrites = writes;
       await waitForSession(pendingWrites, signal);
       const sequence = generation;

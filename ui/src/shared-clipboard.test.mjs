@@ -71,6 +71,7 @@ function fixture({ available = true } = {}) {
   socket.onmessage({ data: JSON.stringify({ hello: { version: 1, os: "windows", session: "fixture-session", formats: ["text", "png", "files"], available } }) });
   return { socket, controller, sent, writes, active, notices, released,
     host: value => { content = value; revision++; },
+    provideAtSameRevision: value => { content = value; },
     guest: value => socket.onmessage({ data: JSON.stringify(value) }),
     readDelay: value => { pauseRead = value; }, writeDelay: value => { pauseWrite = value; },
     delayAcks: () => { delayAcks = true; },
@@ -80,6 +81,44 @@ function fixture({ available = true } = {}) {
     },
   };
 }
+
+test("paste picks up a late image at an already acknowledged empty revision", async () => {
+  const f = fixture();
+  try {
+    await settle();
+    f.host({ text: "" });
+    await f.controller.poll();
+    await f.controller.sync();
+    assert.deepEqual(f.sent, [{ text: "host initial" }, { text: "" }]);
+
+    f.provideAtSameRevision({ png: "late image" });
+    f.delayAcks();
+    let pasted = false;
+    const sync = f.controller.sync().then(() => { pasted = true; });
+    await settle();
+    assert.deepEqual(f.sent.at(-1), { png: "late image" });
+    assert.equal(pasted, false);
+    f.acknowledge();
+    await sync;
+  } finally { f.controller.dispose(); }
+});
+
+test("paste rechecks an empty snapshot from a background read already in flight", async () => {
+  const f = fixture();
+  try {
+    await settle();
+    let release;
+    f.host({ text: "" });
+    f.readDelay(new Promise(resolve => { release = resolve; }));
+    const background = f.controller.poll();
+    await settle();
+    const sync = f.controller.sync();
+    f.provideAtSameRevision({ png: "late image" });
+    release();
+    await Promise.all([background, sync]);
+    assert.deepEqual(f.sent, [{ text: "host initial" }, { text: "" }, { png: "late image" }]);
+  } finally { f.controller.dispose(); }
+});
 
 test("explicit sync rereads a superseded host snapshot and waits for the latest guest acknowledgement", async () => {
   const f = fixture();
